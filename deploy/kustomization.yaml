@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: traefik
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+  - name: traefik-plugin-bulk-redirects
+    files:
+      - ../go.mod
+      - ../bulk_redirects.go
+      - ../.traefik.yml

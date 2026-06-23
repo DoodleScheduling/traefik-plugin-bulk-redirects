@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag, for example v0.1.0'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create release tag
+    runs-on: ubuntu-latest
+
+    env:
+      CGO_ENABLED: 0
+      YAEGI_VERSION: v0.16.1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version
+        run: |
+          if ! echo "${{ inputs.version }}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Invalid version: ${{ inputs.version }}"
+            echo "Expected format: v0.1.0"
+            exit 1
+          fi
+
+          if git rev-parse "${{ inputs.version }}" >/dev/null 2>&1; then
+            echo "Tag already exists: ${{ inputs.version }}"
+            exit 1
+          fi
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Check Go modules
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod
+          if [ -f go.sum ]; then
+            git diff --exit-code go.sum
+          fi
+
+      - name: Run tests
+        run: go test -v -cover ./...
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.12.1
+
+      - name: Install Yaegi
+        run: |
+          curl -sfL https://raw.githubusercontent.com/traefik/yaegi/master/install.sh | bash -s -- -b "$(go env GOPATH)/bin" "${YAEGI_VERSION}"
+
+      - name: Run Yaegi tests
+        run: make yaegi_test
+
+      - name: Create and push tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ inputs.version }}"
+          git push origin "${{ inputs.version }}"
