@@ -2,20 +2,20 @@ displayName: Bulk Redirects
 type: middleware
 iconPath: .assets/icon.png
 
-import: github.com/DoodleScheduling/traefik-plugin-bulk-redirects
+import: github.com/doodlescheduling/traefik-plugin-bulk-redirects
 
 summary: Middleware for Cloudflare-style bulk redirects.
 
 testData:
   redirects:
-  - sourceURL: https://example.com/premium/coupon
-    targetURL: https://example.com/en/premium/
-    statusCode: 302
-    preserveQueryString: enabled
-    subpathMatching: disabled
+    - sourceURL: https://example.com/premium/coupon
+      targetURL: https://example.com/en/premium/
+      statusCode: 302
+      preserveQueryString: enabled
+      subpathMatching: disabled
 
-  - sourceURL: https://example.com/docs
-    targetURL: https://example.com/en/resources
-    statusCode: 301
-    preserveQueryString: enabled
-    subpathMatching: enabled
+    - sourceURL: https://example.com/docs
+      targetURL: https://example.com/en/resources
+      statusCode: 301
+      preserveQueryString: enabled
+      subpathMatching: enabled
