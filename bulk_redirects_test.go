@@ -4,14 +4,14 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
 func TestExactRedirect(t *testing.T) {
 	handler := newTestHandler(t, []Redirect{
 		{
-			SourceHost:          "example.com",
-			SourcePath:          "/premium/coupon",
+			SourceURL:           "https://example.com/premium/coupon",
 			TargetURL:           "https://example.com/en/premium/",
 			StatusCode:          http.StatusFound,
 			PreserveQueryString: "disabled",
@@ -31,8 +31,7 @@ func TestExactRedirect(t *testing.T) {
 func TestPassThroughWhenRedirectIsNotFound(t *testing.T) {
 	handler := newTestHandler(t, []Redirect{
 		{
-			SourceHost:          "example.com",
-			SourcePath:          "/premium/coupon",
+			SourceURL:           "https://example.com/premium/coupon",
 			TargetURL:           "https://example.com/en/premium/",
 			StatusCode:          http.StatusMovedPermanently,
 			PreserveQueryString: "enabled",
@@ -51,8 +50,7 @@ func TestPassThroughWhenRedirectIsNotFound(t *testing.T) {
 func TestExactRedirectPreservesQueryString(t *testing.T) {
 	handler := newTestHandler(t, []Redirect{
 		{
-			SourceHost:          "example.com",
-			SourcePath:          "/premium/coupon",
+			SourceURL:           "https://example.com/premium/coupon",
 			TargetURL:           "https://example.com/en/premium/",
 			StatusCode:          http.StatusFound,
 			PreserveQueryString: "enabled",
@@ -72,8 +70,7 @@ func TestExactRedirectPreservesQueryString(t *testing.T) {
 func TestExactRedirectDoesNotPreserveQueryStringWhenDisabled(t *testing.T) {
 	handler := newTestHandler(t, []Redirect{
 		{
-			SourceHost:          "example.com",
-			SourcePath:          "/premium/coupon",
+			SourceURL:           "https://example.com/premium/coupon",
 			TargetURL:           "https://example.com/en/premium/",
 			StatusCode:          http.StatusFound,
 			PreserveQueryString: "disabled",
@@ -93,8 +90,7 @@ func TestExactRedirectDoesNotPreserveQueryStringWhenDisabled(t *testing.T) {
 func TestRedirectAppendsQueryStringWithAmpersandWhenTargetAlreadyHasQueryString(t *testing.T) {
 	handler := newTestHandler(t, []Redirect{
 		{
-			SourceHost:          "example.com",
-			SourcePath:          "/premium/coupon",
+			SourceURL:           "https://example.com/premium/coupon",
 			TargetURL:           "https://example.com/en/premium/?plan=pro",
 			StatusCode:          http.StatusFound,
 			PreserveQueryString: "enabled",
@@ -111,11 +107,10 @@ func TestRedirectAppendsQueryStringWithAmpersandWhenTargetAlreadyHasQueryString(
 	assertLocation(t, rec, "https://example.com/en/premium/?plan=pro&utm_source=google")
 }
 
-func TestHostIsNormalizedWhenRequestHostContainsPort(t *testing.T) {
+func TestRequestHostIsNormalizedWhenItContainsPort(t *testing.T) {
 	handler := newTestHandler(t, []Redirect{
 		{
-			SourceHost:          "example.com",
-			SourcePath:          "/premium/coupon",
+			SourceURL:           "https://example.com/premium/coupon",
 			TargetURL:           "https://example.com/en/premium/",
 			StatusCode:          http.StatusMovedPermanently,
 			PreserveQueryString: "disabled",
@@ -132,11 +127,10 @@ func TestHostIsNormalizedWhenRequestHostContainsPort(t *testing.T) {
 	assertLocation(t, rec, "https://example.com/en/premium/")
 }
 
-func TestHostIsNormalizedWhenConfiguredHostHasUppercase(t *testing.T) {
+func TestSourceURLHostIsNormalizedWhenConfiguredHostHasUppercase(t *testing.T) {
 	handler := newTestHandler(t, []Redirect{
 		{
-			SourceHost:          "example.com",
-			SourcePath:          "/premium/coupon",
+			SourceURL:           "https://EXAMPLE.com/premium/coupon",
 			TargetURL:           "https://example.com/en/premium/",
 			StatusCode:          http.StatusMovedPermanently,
 			PreserveQueryString: "disabled",
@@ -156,8 +150,7 @@ func TestHostIsNormalizedWhenConfiguredHostHasUppercase(t *testing.T) {
 func TestDefaultStatusCodeIsMovedPermanently(t *testing.T) {
 	handler := newTestHandler(t, []Redirect{
 		{
-			SourceHost:          "example.com",
-			SourcePath:          "/premium/coupon",
+			SourceURL:           "https://example.com/premium/coupon",
 			TargetURL:           "https://example.com/en/premium/",
 			StatusCode:          0,
 			PreserveQueryString: "disabled",
@@ -177,8 +170,7 @@ func TestDefaultStatusCodeIsMovedPermanently(t *testing.T) {
 func TestPrefixRedirectExactSourcePath(t *testing.T) {
 	handler := newTestHandler(t, []Redirect{
 		{
-			SourceHost:          "example.com",
-			SourcePath:          "/docs",
+			SourceURL:           "https://example.com/docs",
 			TargetURL:           "https://example.com/en/resources",
 			StatusCode:          http.StatusMovedPermanently,
 			PreserveQueryString: "enabled",
@@ -198,8 +190,7 @@ func TestPrefixRedirectExactSourcePath(t *testing.T) {
 func TestPrefixRedirectWithSubpath(t *testing.T) {
 	handler := newTestHandler(t, []Redirect{
 		{
-			SourceHost:          "example.com",
-			SourcePath:          "/docs",
+			SourceURL:           "https://example.com/docs",
 			TargetURL:           "https://example.com/en/resources",
 			StatusCode:          http.StatusMovedPermanently,
 			PreserveQueryString: "enabled",
@@ -219,8 +210,7 @@ func TestPrefixRedirectWithSubpath(t *testing.T) {
 func TestPrefixRedirectWithTrailingSlashSourcePath(t *testing.T) {
 	handler := newTestHandler(t, []Redirect{
 		{
-			SourceHost:          "example.com",
-			SourcePath:          "/docs/",
+			SourceURL:           "https://example.com/docs/",
 			TargetURL:           "https://example.com/en/resources/",
 			StatusCode:          http.StatusMovedPermanently,
 			PreserveQueryString: "enabled",
@@ -240,8 +230,7 @@ func TestPrefixRedirectWithTrailingSlashSourcePath(t *testing.T) {
 func TestPrefixRedirectDoesNotMatchSimilarPath(t *testing.T) {
 	handler := newTestHandler(t, []Redirect{
 		{
-			SourceHost:          "example.com",
-			SourcePath:          "/docs",
+			SourceURL:           "https://example.com/docs",
 			TargetURL:           "https://example.com/en/resources",
 			StatusCode:          http.StatusMovedPermanently,
 			PreserveQueryString: "enabled",
@@ -260,16 +249,14 @@ func TestPrefixRedirectDoesNotMatchSimilarPath(t *testing.T) {
 func TestExactRedirectHasPriorityOverPrefixRedirect(t *testing.T) {
 	handler := newTestHandler(t, []Redirect{
 		{
-			SourceHost:          "example.com",
-			SourcePath:          "/docs",
+			SourceURL:           "https://example.com/docs",
 			TargetURL:           "https://example.com/en/resources",
 			StatusCode:          http.StatusMovedPermanently,
 			PreserveQueryString: "enabled",
 			SubpathMatching:     "enabled",
 		},
 		{
-			SourceHost:          "example.com",
-			SourcePath:          "/docs/special",
+			SourceURL:           "https://example.com/docs/special",
 			TargetURL:           "https://example.com/en/special-page",
 			StatusCode:          http.StatusFound,
 			PreserveQueryString: "enabled",
@@ -286,12 +273,117 @@ func TestExactRedirectHasPriorityOverPrefixRedirect(t *testing.T) {
 	assertLocation(t, rec, "https://example.com/en/special-page?utm=test")
 }
 
+func TestMostSpecificPrefixRedirectWins(t *testing.T) {
+	handler := newTestHandler(t, []Redirect{
+		{
+			SourceURL:           "https://example.com/docs",
+			TargetURL:           "https://example.com/en/resources",
+			StatusCode:          http.StatusMovedPermanently,
+			PreserveQueryString: "disabled",
+			SubpathMatching:     "enabled",
+		},
+		{
+			SourceURL:           "https://example.com/docs/api",
+			TargetURL:           "https://example.com/en/api-docs",
+			StatusCode:          http.StatusFound,
+			PreserveQueryString: "disabled",
+			SubpathMatching:     "enabled",
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/docs/api/v1", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assertStatus(t, rec, http.StatusFound)
+	assertLocation(t, rec, "https://example.com/en/api-docs/v1")
+}
+
+func TestRootPrefixRedirectMatchesEveryPath(t *testing.T) {
+	handler := newTestHandler(t, []Redirect{
+		{
+			SourceURL:           "https://example.com/",
+			TargetURL:           "https://example.com/en",
+			StatusCode:          http.StatusMovedPermanently,
+			PreserveQueryString: "enabled",
+			SubpathMatching:     "enabled",
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/foo/bar?utm=test", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assertStatus(t, rec, http.StatusMovedPermanently)
+	assertLocation(t, rec, "https://example.com/en/foo/bar?utm=test")
+}
+
+func TestRootExactRedirectOnlyMatchesRoot(t *testing.T) {
+	handler := newTestHandler(t, []Redirect{
+		{
+			SourceURL:           "https://example.com/",
+			TargetURL:           "https://example.com/en",
+			StatusCode:          http.StatusMovedPermanently,
+			PreserveQueryString: "disabled",
+			SubpathMatching:     "disabled",
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/foo", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assertStatus(t, rec, http.StatusTeapot)
+}
+
+func TestPreserveQueryStringIsCaseInsensitive(t *testing.T) {
+	handler := newTestHandler(t, []Redirect{
+		{
+			SourceURL:           "https://example.com/premium/coupon",
+			TargetURL:           "https://example.com/en/premium/",
+			StatusCode:          http.StatusFound,
+			PreserveQueryString: "ENABLED",
+			SubpathMatching:     "disabled",
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/premium/coupon?utm=test", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assertStatus(t, rec, http.StatusFound)
+	assertLocation(t, rec, "https://example.com/en/premium/?utm=test")
+}
+
+func TestSubpathMatchingIsCaseInsensitive(t *testing.T) {
+	handler := newTestHandler(t, []Redirect{
+		{
+			SourceURL:           "https://example.com/docs",
+			TargetURL:           "https://example.com/en/resources",
+			StatusCode:          http.StatusMovedPermanently,
+			PreserveQueryString: "disabled",
+			SubpathMatching:     "ENABLED",
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/docs/api", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assertStatus(t, rec, http.StatusMovedPermanently)
+	assertLocation(t, rec, "https://example.com/en/resources/api")
+}
+
 func TestNewReturnsErrorForInvalidStatusCode(t *testing.T) {
 	_, err := New(context.Background(), nextHandler(), &Config{
 		Redirects: []Redirect{
 			{
-				SourceHost:          "example.com",
-				SourcePath:          "/premium/coupon",
+				SourceURL:           "https://example.com/premium/coupon",
 				TargetURL:           "https://example.com/en/premium/",
 				StatusCode:          http.StatusOK,
 				PreserveQueryString: "enabled",
@@ -300,16 +392,13 @@ func TestNewReturnsErrorForInvalidStatusCode(t *testing.T) {
 		},
 	}, "bulk-redirects")
 
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	assertErrorContains(t, err, "invalid statusCode")
 }
 
-func TestNewReturnsErrorWhenSourceHostIsMissing(t *testing.T) {
+func TestNewReturnsErrorWhenSourceURLIsMissing(t *testing.T) {
 	_, err := New(context.Background(), nextHandler(), &Config{
 		Redirects: []Redirect{
 			{
-				SourcePath:          "/premium/coupon",
 				TargetURL:           "https://example.com/en/premium/",
 				StatusCode:          http.StatusMovedPermanently,
 				PreserveQueryString: "enabled",
@@ -318,16 +407,14 @@ func TestNewReturnsErrorWhenSourceHostIsMissing(t *testing.T) {
 		},
 	}, "bulk-redirects")
 
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	assertErrorContains(t, err, "sourceURL is required")
 }
 
-func TestNewReturnsErrorWhenSourcePathIsMissing(t *testing.T) {
+func TestNewReturnsErrorWhenSourceURLIsNotAbsolute(t *testing.T) {
 	_, err := New(context.Background(), nextHandler(), &Config{
 		Redirects: []Redirect{
 			{
-				SourceHost:          "example.com",
+				SourceURL:           "example.com/premium/coupon",
 				TargetURL:           "https://example.com/en/premium/",
 				StatusCode:          http.StatusMovedPermanently,
 				PreserveQueryString: "enabled",
@@ -336,17 +423,46 @@ func TestNewReturnsErrorWhenSourcePathIsMissing(t *testing.T) {
 		},
 	}, "bulk-redirects")
 
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	assertErrorContains(t, err, "sourceURL must be absolute")
+}
+
+func TestNewReturnsErrorWhenSourceURLContainsQueryString(t *testing.T) {
+	_, err := New(context.Background(), nextHandler(), &Config{
+		Redirects: []Redirect{
+			{
+				SourceURL:           "https://example.com/premium/coupon?utm=test",
+				TargetURL:           "https://example.com/en/premium/",
+				StatusCode:          http.StatusMovedPermanently,
+				PreserveQueryString: "enabled",
+				SubpathMatching:     "disabled",
+			},
+		},
+	}, "bulk-redirects")
+
+	assertErrorContains(t, err, "sourceURL must not contain query string")
+}
+
+func TestNewReturnsErrorWhenSourceURLContainsFragment(t *testing.T) {
+	_, err := New(context.Background(), nextHandler(), &Config{
+		Redirects: []Redirect{
+			{
+				SourceURL:           "https://example.com/premium/coupon#section",
+				TargetURL:           "https://example.com/en/premium/",
+				StatusCode:          http.StatusMovedPermanently,
+				PreserveQueryString: "enabled",
+				SubpathMatching:     "disabled",
+			},
+		},
+	}, "bulk-redirects")
+
+	assertErrorContains(t, err, "sourceURL must not contain fragment")
 }
 
 func TestNewReturnsErrorWhenTargetURLIsMissing(t *testing.T) {
 	_, err := New(context.Background(), nextHandler(), &Config{
 		Redirects: []Redirect{
 			{
-				SourceHost:          "example.com",
-				SourcePath:          "/premium/coupon",
+				SourceURL:           "https://example.com/premium/coupon",
 				StatusCode:          http.StatusMovedPermanently,
 				PreserveQueryString: "enabled",
 				SubpathMatching:     "disabled",
@@ -354,8 +470,69 @@ func TestNewReturnsErrorWhenTargetURLIsMissing(t *testing.T) {
 		},
 	}, "bulk-redirects")
 
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	assertErrorContains(t, err, "targetURL is required")
+}
+
+func TestNewReturnsErrorWhenTargetURLIsNotAbsolute(t *testing.T) {
+	_, err := New(context.Background(), nextHandler(), &Config{
+		Redirects: []Redirect{
+			{
+				SourceURL:           "https://example.com/premium/coupon",
+				TargetURL:           "/en/premium/",
+				StatusCode:          http.StatusMovedPermanently,
+				PreserveQueryString: "enabled",
+				SubpathMatching:     "disabled",
+			},
+		},
+	}, "bulk-redirects")
+
+	assertErrorContains(t, err, "targetURL must be absolute")
+}
+
+func TestNewReturnsErrorForInvalidPreserveQueryString(t *testing.T) {
+	_, err := New(context.Background(), nextHandler(), &Config{
+		Redirects: []Redirect{
+			{
+				SourceURL:           "https://example.com/premium/coupon",
+				TargetURL:           "https://example.com/en/premium/",
+				StatusCode:          http.StatusMovedPermanently,
+				PreserveQueryString: "true",
+				SubpathMatching:     "disabled",
+			},
+		},
+	}, "bulk-redirects")
+
+	assertErrorContains(t, err, "invalid preserveQueryString")
+}
+
+func TestNewReturnsErrorForInvalidSubpathMatching(t *testing.T) {
+	_, err := New(context.Background(), nextHandler(), &Config{
+		Redirects: []Redirect{
+			{
+				SourceURL:           "https://example.com/premium/coupon",
+				TargetURL:           "https://example.com/en/premium/",
+				StatusCode:          http.StatusMovedPermanently,
+				PreserveQueryString: "enabled",
+				SubpathMatching:     "true",
+			},
+		},
+	}, "bulk-redirects")
+
+	assertErrorContains(t, err, "invalid subpathMatching")
+}
+
+func TestParseSourceURLDefaultsEmptyPathToRoot(t *testing.T) {
+	host, path, err := parseSourceURL("https://example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if host != "example.com" {
+		t.Fatalf("expected host %q, got %q", "example.com", host)
+	}
+
+	if path != "/" {
+		t.Fatalf("expected path %q, got %q", "/", path)
 	}
 }
 
@@ -401,6 +578,12 @@ func TestIsSubpathMatch(t *testing.T) {
 			path:       "/docs",
 			sourcePath: "/docs/",
 			want:       false,
+		},
+		{
+			name:       "root matches child",
+			path:       "/docs",
+			sourcePath: "/",
+			want:       true,
 		},
 	}
 
@@ -456,7 +639,7 @@ func newTestHandler(t *testing.T, redirects []Redirect) http.Handler {
 }
 
 func nextHandler() http.Handler {
-	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+	return http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
 		rw.WriteHeader(http.StatusTeapot)
 	})
 }
@@ -477,42 +660,14 @@ func assertLocation(t *testing.T, rec *httptest.ResponseRecorder, expected strin
 	}
 }
 
-func TestPreserveQueryStringIsCaseInsensitive(t *testing.T) {
-	handler := newTestHandler(t, []Redirect{
-		{
-			SourceHost:          "example.com",
-			SourcePath:          "/premium/coupon",
-			TargetURL:           "https://example.com/en/premium/",
-			StatusCode:          http.StatusFound,
-			PreserveQueryString: "ENABLED",
-			SubpathMatching:     "disabled",
-		},
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "https://example.com/premium/coupon?utm=test", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assertStatus(t, rec, http.StatusFound)
-	assertLocation(t, rec, "https://example.com/en/premium/?utm=test")
-}
-
-func TestNewReturnsErrorWhenSourcePathDoesNotStartWithSlash(t *testing.T) {
-	_, err := New(context.Background(), nextHandler(), &Config{
-		Redirects: []Redirect{
-			{
-				SourceHost:          "example.com",
-				SourcePath:          "premium/coupon",
-				TargetURL:           "https://example.com/en/premium/",
-				StatusCode:          http.StatusMovedPermanently,
-				PreserveQueryString: "enabled",
-				SubpathMatching:     "disabled",
-			},
-		},
-	}, "bulk-redirects")
+func assertErrorContains(t *testing.T, err error, expected string) {
+	t.Helper()
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), expected) {
+		t.Fatalf("expected error to contain %q, got %q", expected, err.Error())
 	}
 }
