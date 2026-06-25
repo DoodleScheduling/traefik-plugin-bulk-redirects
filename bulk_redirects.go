@@ -1,4 +1,4 @@
-package traefik_plugin_bulk_redirects
+package traefik_bulk_redirects
 
 import (
 	"context"
@@ -14,11 +14,23 @@ type Config struct {
 }
 
 type Redirect struct {
-	SourceURL           string `json:"sourceURL,omitempty"`
-	TargetURL           string `json:"targetURL,omitempty"`
-	StatusCode          int    `json:"statusCode,omitempty"`
-	PreserveQueryString string `json:"preserveQueryString,omitempty"`
-	SubpathMatching     string `json:"subpathMatching,omitempty"`
+	SourceURL           string           `json:"sourceURL,omitempty"`
+	TargetURL           string           `json:"targetURL,omitempty"`
+	StatusCode          int              `json:"statusCode,omitempty"`
+	PreserveQueryString string           `json:"preserveQueryString,omitempty"`
+	SubpathMatching     string           `json:"subpathMatching,omitempty"`
+	Dynamic             *DynamicRedirect `json:"dynamic,omitempty"`
+}
+
+type DynamicRedirect struct {
+	Enabled             bool              `json:"enabled,omitempty"`
+	StatusCode          int               `json:"statusCode,omitempty"`
+	PreserveQueryString string            `json:"preserveQueryString,omitempty"`
+	AuthenticatedCookie string            `json:"authenticatedCookie,omitempty"`
+	AuthenticatedTarget string            `json:"authenticatedTarget,omitempty"`
+	LocaleCookie        string            `json:"localeCookie,omitempty"`
+	DefaultTarget       string            `json:"defaultTarget,omitempty"`
+	LocaleTargets       map[string]string `json:"localeTargets,omitempty"`
 }
 
 type Target struct {
@@ -32,6 +44,16 @@ type PrefixRedirect struct {
 	Target     Target
 }
 
+type RuntimeDynamicRedirect struct {
+	StatusCode          int
+	PreserveQueryString string
+	AuthenticatedCookie string
+	AuthenticatedTarget string
+	LocaleCookie        string
+	DefaultTarget       string
+	LocaleTargets       map[string]string
+}
+
 func CreateConfig() *Config {
 	return &Config{
 		Redirects: []Redirect{},
@@ -39,10 +61,11 @@ func CreateConfig() *Config {
 }
 
 type BulkRedirects struct {
-	next            http.Handler
-	name            string
-	exactRedirects  map[string]Target
-	prefixRedirects map[string]PrefixRedirect
+	next             http.Handler
+	name             string
+	exactRedirects   map[string]Target
+	prefixRedirects  map[string]PrefixRedirect
+	dynamicRedirects map[string]RuntimeDynamicRedirect
 }
 
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
@@ -50,12 +73,9 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 
 	exactRedirects := make(map[string]Target, len(config.Redirects))
 	prefixRedirects := make(map[string]PrefixRedirect)
+	dynamicRedirects := make(map[string]RuntimeDynamicRedirect)
 
 	for _, redirect := range config.Redirects {
-		if redirect.StatusCode == 0 {
-			redirect.StatusCode = http.StatusMovedPermanently
-		}
-
 		if redirect.SourceURL == "" {
 			return nil, fmt.Errorf("sourceURL is required")
 		}
@@ -65,24 +85,28 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 			return nil, err
 		}
 
-		if redirect.TargetURL == "" {
-			return nil, fmt.Errorf("targetURL is required for %s", redirect.SourceURL)
+		key := buildKey(sourceHost, sourcePath)
+
+		if isDynamicRedirect(redirect) {
+			if err := validateDynamicRedirect(redirect.SourceURL, redirect); err != nil {
+				return nil, err
+			}
+
+			dynamicRedirects[key] = RuntimeDynamicRedirect{
+				StatusCode:          redirect.Dynamic.StatusCode,
+				PreserveQueryString: redirect.Dynamic.PreserveQueryString,
+				AuthenticatedCookie: redirect.Dynamic.AuthenticatedCookie,
+				AuthenticatedTarget: redirect.Dynamic.AuthenticatedTarget,
+				LocaleCookie:        redirect.Dynamic.LocaleCookie,
+				DefaultTarget:       redirect.Dynamic.DefaultTarget,
+				LocaleTargets:       normalizeLocaleTargets(redirect.Dynamic.LocaleTargets),
+			}
+
+			continue
 		}
 
-		if err := validateTargetURL(redirect.TargetURL); err != nil {
-			return nil, fmt.Errorf("invalid targetURL %q for %s: %w", redirect.TargetURL, redirect.SourceURL, err)
-		}
-
-		if !isValidRedirectStatusCode(redirect.StatusCode) {
-			return nil, fmt.Errorf("invalid statusCode %d for %s", redirect.StatusCode, redirect.SourceURL)
-		}
-
-		if !isValidEnabledDisabledValue(redirect.PreserveQueryString) {
-			return nil, fmt.Errorf("invalid preserveQueryString %q for %s", redirect.PreserveQueryString, redirect.SourceURL)
-		}
-
-		if !isValidEnabledDisabledValue(redirect.SubpathMatching) {
-			return nil, fmt.Errorf("invalid subpathMatching %q for %s", redirect.SubpathMatching, redirect.SourceURL)
+		if err := validateStaticRedirect(redirect.SourceURL, &redirect); err != nil {
+			return nil, err
 		}
 
 		target := Target{
@@ -91,13 +115,12 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 			PreserveQueryString: redirect.PreserveQueryString,
 		}
 
-		key := buildKey(sourceHost, sourcePath)
-
 		if strings.EqualFold(redirect.SubpathMatching, "enabled") {
 			prefixRedirects[key] = PrefixRedirect{
 				SourcePath: sourcePath,
 				Target:     target,
 			}
+
 			continue
 		}
 
@@ -105,10 +128,11 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	}
 
 	return &BulkRedirects{
-		next:            next,
-		name:            name,
-		exactRedirects:  exactRedirects,
-		prefixRedirects: prefixRedirects,
+		next:             next,
+		name:             name,
+		exactRedirects:   exactRedirects,
+		prefixRedirects:  prefixRedirects,
+		dynamicRedirects: dynamicRedirects,
 	}, nil
 }
 
@@ -119,9 +143,18 @@ func (bulkRedirects *BulkRedirects) ServeHTTP(rw http.ResponseWriter, req *http.
 		path = "/"
 	}
 
-	if target, found := bulkRedirects.exactRedirects[buildKey(host, path)]; found {
+	key := buildKey(host, path)
+
+	if target, found := bulkRedirects.exactRedirects[key]; found {
 		redirect(rw, req, target, "")
 		return
+	}
+
+	if dynamicRedirect, found := bulkRedirects.dynamicRedirects[key]; found {
+		if target, found := resolveDynamicRedirect(req, dynamicRedirect); found {
+			redirect(rw, req, target, "")
+			return
+		}
 	}
 
 	if prefixRedirect, found := bulkRedirects.findPrefixRedirect(host, path); found {
@@ -207,6 +240,50 @@ func redirect(rw http.ResponseWriter, req *http.Request, target Target, suffix s
 	http.Redirect(rw, req, targetURL, target.StatusCode)
 }
 
+func resolveDynamicRedirect(req *http.Request, dynamicRedirect RuntimeDynamicRedirect) (Target, bool) {
+	if dynamicRedirect.AuthenticatedCookie != "" && dynamicRedirect.AuthenticatedTarget != "" {
+		if cookie, err := req.Cookie(dynamicRedirect.AuthenticatedCookie); err == nil && cookie.Value != "" {
+			return Target{
+				URL:                 dynamicRedirect.AuthenticatedTarget,
+				StatusCode:          dynamicRedirect.StatusCode,
+				PreserveQueryString: dynamicRedirect.PreserveQueryString,
+			}, true
+		}
+	}
+
+	if dynamicRedirect.LocaleCookie != "" {
+		if cookie, err := req.Cookie(dynamicRedirect.LocaleCookie); err == nil {
+			locale := strings.ToLower(cookie.Value)
+
+			if targetURL, found := dynamicRedirect.LocaleTargets[locale]; found {
+				return Target{
+					URL:                 targetURL,
+					StatusCode:          dynamicRedirect.StatusCode,
+					PreserveQueryString: dynamicRedirect.PreserveQueryString,
+				}, true
+			}
+		}
+	}
+
+	if locale, found := findLocaleFromAcceptLanguage(req.Header.Get("Accept-Language"), dynamicRedirect.LocaleTargets); found {
+		return Target{
+			URL:                 dynamicRedirect.LocaleTargets[locale],
+			StatusCode:          dynamicRedirect.StatusCode,
+			PreserveQueryString: dynamicRedirect.PreserveQueryString,
+		}, true
+	}
+
+	if dynamicRedirect.DefaultTarget != "" {
+		return Target{
+			URL:                 dynamicRedirect.DefaultTarget,
+			StatusCode:          dynamicRedirect.StatusCode,
+			PreserveQueryString: dynamicRedirect.PreserveQueryString,
+		}, true
+	}
+
+	return Target{}, false
+}
+
 func parseSourceURL(sourceURL string) (string, string, error) {
 	parsed, err := url.Parse(sourceURL)
 	if err != nil {
@@ -245,6 +322,134 @@ func validateTargetURL(targetURL string) error {
 	}
 
 	return nil
+}
+
+func validateStaticRedirect(sourceURL string, redirect *Redirect) error {
+	if redirect.StatusCode == 0 {
+		redirect.StatusCode = http.StatusMovedPermanently
+	}
+
+	if redirect.TargetURL == "" {
+		return fmt.Errorf("targetURL is required for %s", sourceURL)
+	}
+
+	if err := validateTargetURL(redirect.TargetURL); err != nil {
+		return fmt.Errorf("invalid targetURL %q for %s: %w", redirect.TargetURL, sourceURL, err)
+	}
+
+	if !isValidRedirectStatusCode(redirect.StatusCode) {
+		return fmt.Errorf("invalid statusCode %d for %s", redirect.StatusCode, sourceURL)
+	}
+
+	if !isValidEnabledDisabledValue(redirect.PreserveQueryString) {
+		return fmt.Errorf("invalid preserveQueryString %q for %s", redirect.PreserveQueryString, sourceURL)
+	}
+
+	if !isValidEnabledDisabledValue(redirect.SubpathMatching) {
+		return fmt.Errorf("invalid subpathMatching %q for %s", redirect.SubpathMatching, sourceURL)
+	}
+
+	return nil
+}
+
+func validateDynamicRedirect(sourceURL string, redirect Redirect) error {
+	dynamic := redirect.Dynamic
+	if dynamic == nil || !dynamic.Enabled {
+		return nil
+	}
+
+	if redirect.TargetURL != "" {
+		return fmt.Errorf("targetURL must not be set when dynamic.enabled=true for %s", sourceURL)
+	}
+
+	if strings.EqualFold(redirect.SubpathMatching, "enabled") {
+		return fmt.Errorf("subpathMatching is not supported when dynamic.enabled=true for %s", sourceURL)
+	}
+
+	if dynamic.StatusCode == 0 {
+		dynamic.StatusCode = http.StatusFound
+	}
+
+	if !isValidRedirectStatusCode(dynamic.StatusCode) {
+		return fmt.Errorf("invalid dynamic.statusCode %d for %s", dynamic.StatusCode, sourceURL)
+	}
+
+	if dynamic.PreserveQueryString == "" {
+		dynamic.PreserveQueryString = "enabled"
+	}
+
+	if !isValidEnabledDisabledValue(dynamic.PreserveQueryString) {
+		return fmt.Errorf("invalid dynamic.preserveQueryString %q for %s", dynamic.PreserveQueryString, sourceURL)
+	}
+
+	if dynamic.DefaultTarget == "" {
+		return fmt.Errorf("dynamic.defaultTarget is required for %s", sourceURL)
+	}
+
+	if err := validateTargetURL(dynamic.DefaultTarget); err != nil {
+		return fmt.Errorf("invalid dynamic.defaultTarget %q for %s: %w", dynamic.DefaultTarget, sourceURL, err)
+	}
+
+	if dynamic.AuthenticatedTarget != "" {
+		if dynamic.AuthenticatedCookie == "" {
+			return fmt.Errorf("dynamic.authenticatedCookie is required when dynamic.authenticatedTarget is set for %s", sourceURL)
+		}
+
+		if err := validateTargetURL(dynamic.AuthenticatedTarget); err != nil {
+			return fmt.Errorf("invalid dynamic.authenticatedTarget %q for %s: %w", dynamic.AuthenticatedTarget, sourceURL, err)
+		}
+	}
+
+	if dynamic.LocaleCookie != "" && len(dynamic.LocaleTargets) == 0 {
+		return fmt.Errorf("dynamic.localeTargets is required when dynamic.localeCookie is set for %s", sourceURL)
+	}
+
+	for locale, targetURL := range dynamic.LocaleTargets {
+		if locale == "" {
+			return fmt.Errorf("dynamic.localeTargets contains empty locale for %s", sourceURL)
+		}
+
+		if err := validateTargetURL(targetURL); err != nil {
+			return fmt.Errorf("invalid dynamic.localeTargets[%q]=%q for %s: %w", locale, targetURL, sourceURL, err)
+		}
+	}
+
+	return nil
+}
+
+func isDynamicRedirect(redirect Redirect) bool {
+	return redirect.Dynamic != nil && redirect.Dynamic.Enabled
+}
+
+func findLocaleFromAcceptLanguage(header string, supported map[string]string) (string, bool) {
+	languages := strings.Split(header, ",")
+
+	for _, language := range languages {
+		language = strings.TrimSpace(strings.ToLower(language))
+		language = strings.Split(language, ";")[0]
+
+		if language == "" {
+			continue
+		}
+
+		baseLanguage := strings.Split(language, "-")[0]
+
+		if _, found := supported[baseLanguage]; found {
+			return baseLanguage, true
+		}
+	}
+
+	return "", false
+}
+
+func normalizeLocaleTargets(localeTargets map[string]string) map[string]string {
+	normalized := make(map[string]string, len(localeTargets))
+
+	for locale, targetURL := range localeTargets {
+		normalized[strings.ToLower(locale)] = targetURL
+	}
+
+	return normalized
 }
 
 func normalizeHost(host string) string {

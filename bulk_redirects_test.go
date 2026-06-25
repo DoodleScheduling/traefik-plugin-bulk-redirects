@@ -1,4 +1,4 @@
-package traefik_plugin_bulk_redirects
+package traefik_bulk_redirects
 
 import (
 	"context"
@@ -379,6 +379,210 @@ func TestSubpathMatchingIsCaseInsensitive(t *testing.T) {
 	assertLocation(t, rec, "https://example.com/en/resources/api")
 }
 
+func TestDynamicRedirectWithAuthenticatedCookie(t *testing.T) {
+	handler := newTestHandler(t, []Redirect{
+		{
+			SourceURL: "https://example.com/",
+			Dynamic:   testDynamicRedirect(),
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/", nil)
+	req.AddCookie(&http.Cookie{
+		Name:  "DoodleAuthentication",
+		Value: "abc",
+	})
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assertStatus(t, rec, http.StatusFound)
+	assertLocation(t, rec, "https://example.com/home/")
+}
+
+func TestDynamicRedirectWithLocaleCookie(t *testing.T) {
+	handler := newTestHandler(t, []Redirect{
+		{
+			SourceURL: "https://example.com/",
+			Dynamic:   testDynamicRedirect(),
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/", nil)
+	req.AddCookie(&http.Cookie{
+		Name:  "locale",
+		Value: "es",
+	})
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assertStatus(t, rec, http.StatusFound)
+	assertLocation(t, rec, "https://example.com/es/")
+}
+
+func TestDynamicRedirectWithLocaleCookieIsCaseInsensitive(t *testing.T) {
+	handler := newTestHandler(t, []Redirect{
+		{
+			SourceURL: "https://example.com/",
+			Dynamic: &DynamicRedirect{
+				Enabled:             true,
+				StatusCode:          http.StatusFound,
+				PreserveQueryString: "enabled",
+				LocaleCookie:        "locale",
+				DefaultTarget:       "https://example.com/en/",
+				LocaleTargets: map[string]string{
+					"DE": "https://example.com/de/",
+					"IT": "https://example.com/it/",
+					"FR": "https://example.com/fr/",
+					"ES": "https://example.com/es/",
+				},
+			},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/", nil)
+	req.AddCookie(&http.Cookie{
+		Name:  "locale",
+		Value: "ES",
+	})
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assertStatus(t, rec, http.StatusFound)
+	assertLocation(t, rec, "https://example.com/es/")
+}
+
+func TestDynamicRedirectWithAcceptLanguage(t *testing.T) {
+	handler := newTestHandler(t, []Redirect{
+		{
+			SourceURL: "https://example.com/",
+			Dynamic:   testDynamicRedirect(),
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/", nil)
+	req.Header.Set("Accept-Language", "fr-FR,fr;q=0.9,en;q=0.8")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assertStatus(t, rec, http.StatusFound)
+	assertLocation(t, rec, "https://example.com/fr/")
+}
+
+func TestDynamicRedirectUsesFirstSupportedAcceptLanguage(t *testing.T) {
+	handler := newTestHandler(t, []Redirect{
+		{
+			SourceURL: "https://example.com/",
+			Dynamic: &DynamicRedirect{
+				Enabled:             true,
+				StatusCode:          http.StatusFound,
+				PreserveQueryString: "enabled",
+				DefaultTarget:       "https://example.com/en/",
+				LocaleTargets: map[string]string{
+					"de": "https://example.com/de/",
+					"fr": "https://example.com/fr/",
+					"es": "https://example.com/es/",
+				},
+			},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/", nil)
+	req.Header.Set("Accept-Language", "nl-NL,nl;q=0.9,es-ES;q=0.8,fr-FR;q=0.7")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assertStatus(t, rec, http.StatusFound)
+	assertLocation(t, rec, "https://example.com/es/")
+}
+
+func TestDynamicRedirectFallsBackToDefaultTarget(t *testing.T) {
+	handler := newTestHandler(t, []Redirect{
+		{
+			SourceURL: "https://example.com/",
+			Dynamic:   testDynamicRedirect(),
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/", nil)
+	req.Header.Set("Accept-Language", "nl-NL,nl;q=0.9,en;q=0.8")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assertStatus(t, rec, http.StatusFound)
+	assertLocation(t, rec, "https://example.com/en/")
+}
+
+func TestDynamicRedirectPreservesQueryString(t *testing.T) {
+	handler := newTestHandler(t, []Redirect{
+		{
+			SourceURL: "https://example.com/",
+			Dynamic:   testDynamicRedirect(),
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/?utm_source=google&campaign=test", nil)
+	req.AddCookie(&http.Cookie{
+		Name:  "DoodleAuthentication",
+		Value: "abc",
+	})
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assertStatus(t, rec, http.StatusFound)
+	assertLocation(t, rec, "https://example.com/home/?utm_source=google&campaign=test")
+}
+
+func TestDynamicRedirectDoesNotPreserveQueryStringWhenDisabled(t *testing.T) {
+	dynamicRedirect := testDynamicRedirect()
+	dynamicRedirect.PreserveQueryString = "disabled"
+
+	handler := newTestHandler(t, []Redirect{
+		{
+			SourceURL: "https://example.com/",
+			Dynamic:   dynamicRedirect,
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/?utm_source=google", nil)
+	req.AddCookie(&http.Cookie{
+		Name:  "DoodleAuthentication",
+		Value: "abc",
+	})
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assertStatus(t, rec, http.StatusFound)
+	assertLocation(t, rec, "https://example.com/home/")
+}
+
+func TestDynamicRedirectOnlyMatchesConfiguredSourcePath(t *testing.T) {
+	handler := newTestHandler(t, []Redirect{
+		{
+			SourceURL: "https://example.com/",
+			Dynamic:   testDynamicRedirect(),
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/random", nil)
+	req.AddCookie(&http.Cookie{
+		Name:  "DoodleAuthentication",
+		Value: "abc",
+	})
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assertStatus(t, rec, http.StatusTeapot)
+}
+
 func TestNewReturnsErrorForInvalidStatusCode(t *testing.T) {
 	_, err := New(context.Background(), nextHandler(), &Config{
 		Redirects: []Redirect{
@@ -521,6 +725,176 @@ func TestNewReturnsErrorForInvalidSubpathMatching(t *testing.T) {
 	assertErrorContains(t, err, "invalid subpathMatching")
 }
 
+func TestNewReturnsErrorWhenDynamicRedirectHasTargetURL(t *testing.T) {
+	_, err := New(context.Background(), nextHandler(), &Config{
+		Redirects: []Redirect{
+			{
+				SourceURL: "https://example.com/",
+				TargetURL: "https://example.com/en/",
+				Dynamic: &DynamicRedirect{
+					Enabled:       true,
+					DefaultTarget: "https://example.com/en/",
+				},
+			},
+		},
+	}, "bulk-redirects")
+
+	assertErrorContains(t, err, "targetURL must not be set when dynamic.enabled=true")
+}
+
+func TestNewReturnsErrorWhenDynamicRedirectHasSubpathMatchingEnabled(t *testing.T) {
+	_, err := New(context.Background(), nextHandler(), &Config{
+		Redirects: []Redirect{
+			{
+				SourceURL:       "https://example.com/",
+				SubpathMatching: "enabled",
+				Dynamic: &DynamicRedirect{
+					Enabled:       true,
+					DefaultTarget: "https://example.com/en/",
+				},
+			},
+		},
+	}, "bulk-redirects")
+
+	assertErrorContains(t, err, "subpathMatching is not supported when dynamic.enabled=true")
+}
+
+func TestNewReturnsErrorWhenDynamicDefaultTargetIsMissing(t *testing.T) {
+	_, err := New(context.Background(), nextHandler(), &Config{
+		Redirects: []Redirect{
+			{
+				SourceURL: "https://example.com/",
+				Dynamic: &DynamicRedirect{
+					Enabled: true,
+				},
+			},
+		},
+	}, "bulk-redirects")
+
+	assertErrorContains(t, err, "dynamic.defaultTarget is required")
+}
+
+func TestNewReturnsErrorWhenDynamicDefaultTargetIsNotAbsolute(t *testing.T) {
+	_, err := New(context.Background(), nextHandler(), &Config{
+		Redirects: []Redirect{
+			{
+				SourceURL: "https://example.com/",
+				Dynamic: &DynamicRedirect{
+					Enabled:       true,
+					DefaultTarget: "/en/",
+				},
+			},
+		},
+	}, "bulk-redirects")
+
+	assertErrorContains(t, err, "invalid dynamic.defaultTarget")
+}
+
+func TestNewReturnsErrorWhenDynamicStatusCodeIsInvalid(t *testing.T) {
+	_, err := New(context.Background(), nextHandler(), &Config{
+		Redirects: []Redirect{
+			{
+				SourceURL: "https://example.com/",
+				Dynamic: &DynamicRedirect{
+					Enabled:       true,
+					StatusCode:    http.StatusOK,
+					DefaultTarget: "https://example.com/en/",
+				},
+			},
+		},
+	}, "bulk-redirects")
+
+	assertErrorContains(t, err, "invalid dynamic.statusCode")
+}
+
+func TestNewReturnsErrorWhenDynamicPreserveQueryStringIsInvalid(t *testing.T) {
+	_, err := New(context.Background(), nextHandler(), &Config{
+		Redirects: []Redirect{
+			{
+				SourceURL: "https://example.com/",
+				Dynamic: &DynamicRedirect{
+					Enabled:             true,
+					PreserveQueryString: "true",
+					DefaultTarget:       "https://example.com/en/",
+				},
+			},
+		},
+	}, "bulk-redirects")
+
+	assertErrorContains(t, err, "invalid dynamic.preserveQueryString")
+}
+
+func TestNewReturnsErrorWhenDynamicAuthenticatedTargetHasNoCookie(t *testing.T) {
+	_, err := New(context.Background(), nextHandler(), &Config{
+		Redirects: []Redirect{
+			{
+				SourceURL: "https://example.com/",
+				Dynamic: &DynamicRedirect{
+					Enabled:             true,
+					AuthenticatedTarget: "https://example.com/home/",
+					DefaultTarget:       "https://example.com/en/",
+				},
+			},
+		},
+	}, "bulk-redirects")
+
+	assertErrorContains(t, err, "dynamic.authenticatedCookie is required")
+}
+
+func TestNewReturnsErrorWhenDynamicAuthenticatedTargetIsNotAbsolute(t *testing.T) {
+	_, err := New(context.Background(), nextHandler(), &Config{
+		Redirects: []Redirect{
+			{
+				SourceURL: "https://example.com/",
+				Dynamic: &DynamicRedirect{
+					Enabled:             true,
+					AuthenticatedCookie: "DoodleAuthentication",
+					AuthenticatedTarget: "/home/",
+					DefaultTarget:       "https://example.com/en/",
+				},
+			},
+		},
+	}, "bulk-redirects")
+
+	assertErrorContains(t, err, "invalid dynamic.authenticatedTarget")
+}
+
+func TestNewReturnsErrorWhenDynamicLocaleCookieHasNoLocaleTargets(t *testing.T) {
+	_, err := New(context.Background(), nextHandler(), &Config{
+		Redirects: []Redirect{
+			{
+				SourceURL: "https://example.com/",
+				Dynamic: &DynamicRedirect{
+					Enabled:       true,
+					LocaleCookie:  "locale",
+					DefaultTarget: "https://example.com/en/",
+				},
+			},
+		},
+	}, "bulk-redirects")
+
+	assertErrorContains(t, err, "dynamic.localeTargets is required")
+}
+
+func TestNewReturnsErrorWhenDynamicLocaleTargetIsNotAbsolute(t *testing.T) {
+	_, err := New(context.Background(), nextHandler(), &Config{
+		Redirects: []Redirect{
+			{
+				SourceURL: "https://example.com/",
+				Dynamic: &DynamicRedirect{
+					Enabled:       true,
+					DefaultTarget: "https://example.com/en/",
+					LocaleTargets: map[string]string{
+						"es": "/es/",
+					},
+				},
+			},
+		},
+	}, "bulk-redirects")
+
+	assertErrorContains(t, err, "invalid dynamic.localeTargets")
+}
+
 func TestParseSourceURLDefaultsEmptyPathToRoot(t *testing.T) {
 	host, path, err := parseSourceURL("https://example.com")
 	if err != nil {
@@ -642,6 +1016,24 @@ func nextHandler() http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
 		rw.WriteHeader(http.StatusTeapot)
 	})
+}
+
+func testDynamicRedirect() *DynamicRedirect {
+	return &DynamicRedirect{
+		Enabled:             true,
+		StatusCode:          http.StatusFound,
+		PreserveQueryString: "enabled",
+		AuthenticatedCookie: "DoodleAuthentication",
+		AuthenticatedTarget: "https://example.com/home/",
+		LocaleCookie:        "locale",
+		DefaultTarget:       "https://example.com/en/",
+		LocaleTargets: map[string]string{
+			"de": "https://example.com/de/",
+			"it": "https://example.com/it/",
+			"fr": "https://example.com/fr/",
+			"es": "https://example.com/es/",
+		},
+	}
 }
 
 func assertStatus(t *testing.T, rec *httptest.ResponseRecorder, expected int) {
