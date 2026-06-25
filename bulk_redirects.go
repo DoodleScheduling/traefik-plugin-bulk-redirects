@@ -144,16 +144,15 @@ func (bulkRedirects *BulkRedirects) ServeHTTP(rw http.ResponseWriter, req *http.
 	}
 
 	if target, found := bulkRedirects.exactRedirects[buildKey(host, path)]; found {
-		bulkRedirects.recordRedirect("exact", target, start)
 		redirect(rw, req, target, "")
+		bulkRedirects.recordRedirect("exact", target, start)
 		return
 	}
 
 	if prefixRedirect, found := bulkRedirects.findPrefixRedirect(host, path); found {
-		bulkRedirects.recordRedirect("prefix", prefixRedirect.Target, start)
-
 		suffix := strings.TrimPrefix(path, prefixRedirect.SourcePath)
 		redirect(rw, req, prefixRedirect.Target, suffix)
+		bulkRedirects.recordRedirect("prefix", prefixRedirect.Target, start)
 		return
 	}
 
