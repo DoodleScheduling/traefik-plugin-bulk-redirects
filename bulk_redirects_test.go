@@ -389,7 +389,7 @@ func TestDynamicRedirectWithAuthenticatedCookie(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/", nil)
 	req.AddCookie(&http.Cookie{
-		Name:  "DoodleAuthentication",
+		Name:  "Authentication",
 		Value: "abc",
 	})
 	rec := httptest.NewRecorder()
@@ -528,7 +528,7 @@ func TestDynamicRedirectPreservesQueryString(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/?utm_source=google&campaign=test", nil)
 	req.AddCookie(&http.Cookie{
-		Name:  "DoodleAuthentication",
+		Name:  "Authentication",
 		Value: "abc",
 	})
 	rec := httptest.NewRecorder()
@@ -552,7 +552,7 @@ func TestDynamicRedirectDoesNotPreserveQueryStringWhenDisabled(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/?utm_source=google", nil)
 	req.AddCookie(&http.Cookie{
-		Name:  "DoodleAuthentication",
+		Name:  "Authentication",
 		Value: "abc",
 	})
 	rec := httptest.NewRecorder()
@@ -573,7 +573,7 @@ func TestDynamicRedirectOnlyMatchesConfiguredSourcePath(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/random", nil)
 	req.AddCookie(&http.Cookie{
-		Name:  "DoodleAuthentication",
+		Name:  "Authentication",
 		Value: "abc",
 	})
 	rec := httptest.NewRecorder()
@@ -848,7 +848,7 @@ func TestNewReturnsErrorWhenDynamicAuthenticatedTargetIsNotAbsolute(t *testing.T
 				SourceURL: "https://example.com/",
 				Dynamic: &DynamicRedirect{
 					Enabled:             true,
-					AuthenticatedCookie: "DoodleAuthentication",
+					AuthenticatedCookie: "Authentication",
 					AuthenticatedTarget: "/home/",
 					DefaultTarget:       "https://example.com/en/",
 				},
@@ -1023,7 +1023,7 @@ func testDynamicRedirect() *DynamicRedirect {
 		Enabled:             true,
 		StatusCode:          http.StatusFound,
 		PreserveQueryString: "enabled",
-		AuthenticatedCookie: "DoodleAuthentication",
+		AuthenticatedCookie: "Authentication",
 		AuthenticatedTarget: "https://example.com/home/",
 		LocaleCookie:        "locale",
 		DefaultTarget:       "https://example.com/en/",
