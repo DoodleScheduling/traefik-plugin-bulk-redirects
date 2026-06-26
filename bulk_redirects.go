@@ -17,14 +17,14 @@ type Redirect struct {
 	SourceURL           string `json:"sourceURL,omitempty"`
 	TargetURL           string `json:"targetURL,omitempty"`
 	StatusCode          int    `json:"statusCode,omitempty"`
-	PreserveQueryString string `json:"preserveQueryString,omitempty"`
-	SubpathMatching     string `json:"subpathMatching,omitempty"`
+	PreserveQueryString bool   `json:"preserveQueryString,omitempty"`
+	SubpathMatching     bool   `json:"subpathMatching,omitempty"`
 }
 
 type Target struct {
 	URL                 string
 	StatusCode          int
-	PreserveQueryString string
+	PreserveQueryString bool
 }
 
 type PrefixRedirect struct {
@@ -77,14 +77,6 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 			return nil, fmt.Errorf("invalid statusCode %d for %s", redirect.StatusCode, redirect.SourceURL)
 		}
 
-		if !isValidEnabledDisabledValue(redirect.PreserveQueryString) {
-			return nil, fmt.Errorf("invalid preserveQueryString %q for %s", redirect.PreserveQueryString, redirect.SourceURL)
-		}
-
-		if !isValidEnabledDisabledValue(redirect.SubpathMatching) {
-			return nil, fmt.Errorf("invalid subpathMatching %q for %s", redirect.SubpathMatching, redirect.SourceURL)
-		}
-
 		target := Target{
 			URL:                 redirect.TargetURL,
 			StatusCode:          redirect.StatusCode,
@@ -93,7 +85,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 
 		key := buildKey(sourceHost, sourcePath)
 
-		if strings.EqualFold(redirect.SubpathMatching, "enabled") {
+		if redirect.SubpathMatching {
 			prefixRedirects[key] = PrefixRedirect{
 				SourcePath: sourcePath,
 				Target:     target,
@@ -195,7 +187,7 @@ func redirect(rw http.ResponseWriter, req *http.Request, target Target, suffix s
 		targetURL = strings.TrimRight(targetURL, "/") + "/" + strings.TrimLeft(suffix, "/")
 	}
 
-	if strings.EqualFold(target.PreserveQueryString, "enabled") && req.URL.RawQuery != "" {
+	if target.PreserveQueryString && req.URL.RawQuery != "" {
 		separator := "?"
 		if strings.Contains(targetURL, "?") {
 			separator = "&"
@@ -284,8 +276,4 @@ func isSubpathMatch(path, sourcePath string) bool {
 	}
 
 	return strings.HasPrefix(path, sourcePath+"/")
-}
-
-func isValidEnabledDisabledValue(value string) bool {
-	return value == "" || strings.EqualFold(value, "enabled") || strings.EqualFold(value, "disabled")
 }

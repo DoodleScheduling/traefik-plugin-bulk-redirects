@@ -11,11 +11,11 @@ testData:
     - sourceURL: https://example.com/premium/coupon
       targetURL: https://example.com/en/premium/
       statusCode: 302
-      preserveQueryString: enabled
-      subpathMatching: disabled
+      preserveQueryString: true
+      subpathMatching: false
 
     - sourceURL: https://example.com/docs
       targetURL: https://example.com/en/resources
       statusCode: 301
-      preserveQueryString: enabled
-      subpathMatching: enabled
+      preserveQueryString: true
+      subpathMatching: true
